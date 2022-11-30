@@ -1,0 +1,125 @@
+---
+title: "Yamamoto Study"
+author: "Akihiro Shiroshita"
+date: "`r Sys.time()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	fig.height = 4,
+	fig.pos = "t",
+	message = FALSE,
+	warning = FALSE,
+	dpi = 350,
+	out.extra = ""
+)
+packages = c("data.table",
+             "lava",
+             "lme4",
+             "nlme",
+             "readxl",
+             "irr",
+             "tidyverse",
+             "psych",
+             "lubridate",
+             "ggplot2",
+             "RColorBrewer",
+             "ggplotgui",
+             "boot")
+package.check <- lapply(packages, FUN = function(x){
+  if (!require(x, character.only = TRUE)){
+    install.packages(x, dependencies = TRUE)
+    library(x, character.only = TRUE)
+  }
+})
+
+gai_data <- read_excel("input/gai.xls")
+```
+
+# Intraclass correlation  
+
+Important references: Psychol Methods. 1996;1:30–46.   
+
+Intraclass correlation (ICC): $ICC=\frac{Var_{Between-group}}{Var_{Total}}=\frac{\tau^2}{\tau^2 + \sigma^2}$ ($\tau$: between-group variance, $\sigma$: within-group wariance)  
+
+Intra-rater reliability reflects that measured by a rater across multiple observations while inter-rater reliability reflects the variation of measurements between multiple raters. We are **not** interested in the absolute agreement, but the consistency of the methodology (GAI and VTM, respectively). In this study, there were three levels (patient N = 50, rater N = 4, and time N = 2).        
+
+# Intra-rater reliability  
+This analysis aimed to generalize the intra-rater reliability to general raters. 
+Thus, we are interested in specific raters, but are not interested in time.  
+Three-way mixed-effects model.    
+
+$Y_{i,j,t} = \alpha + \beta_t t + u_i + v_ij + \epsilon_{i,j,t}$ ($t$: rater, $i$: patient, $j$: time, $\alpha$: intercept)  
+where $u_i \sim N(0,\tau^2)$, $v_{ij} \sim N(0,\delta^2)$ and $\epsilon_{i,j,t} \sim N(0,\sigma^2)$  
+$ICC=\frac{\tau^2}{\tau^2 + \frac{\sigma^2 + \delta^2}{4}}$
+
+```{r}
+fit_intra <- lmer(angle ~ 1 + rater + (1|id/time), data = gai_data)
+
+sigma_id_intra <- attr(VarCorr(fit_intra)[["id"]],"stddev")
+sigma_id_time_intra <- attr(VarCorr(fit_intra)[["time:id"]],"stddev")
+sigma_rater_intra <- attr(VarCorr(fit_intra)[["rater"]],"stddev")
+sigma_error_intra <- attr(VarCorr(fit_intra),"sc")
+
+icc_intra <- sigma_id_intra^2/((sigma_error_intra^2+sigma_id_time_intra^2+sigma_id_time_intra^2)/4+sigma_id_intra^2)
+icc_intra
+
+intra_boot_func <-  function(data, index){
+  fit_intra <- lmer(angle ~ 1 + rater + (1|id/time), data = data[index,])
+  sigma_id_intra <- attr(VarCorr(fit_intra)[["id"]],"stddev")
+  sigma_id_time_intra <- attr(VarCorr(fit_intra)[["time:id"]],"stddev")
+  sigma_rater_intra <- attr(VarCorr(fit_intra)[["rater"]],"stddev")
+  sigma_error_intra <- attr(VarCorr(fit_intra),"sc")
+  icc_intra <- sigma_id_intra^2/((sigma_error_intra^2+sigma_id_time_intra^2)/4+sigma_id_intra^2)
+  return(icc_intra)
+}
+
+set.seed(1234)
+res_intra <- boot(intra_boot_func,
+                  data = gai_data,
+                  R = 1000)
+res_intra[["t0"]]
+boot.ci(res_intra, type = "perc")
+```
+
+# Inter-rater reliability  
+
+This analysis aimed to generalize the inter-rater reliability to general raters. 
+Thus, we are not interested in specific raters. Actually, the raters were *not* randomly selected from the source population.    
+Three-way random-effects model.    
+
+The variance components splits the variance into three pieces (patient, rater, time).
+$Y_{i,j,t} = \alpha + u_i + v_j + z_k + \epsilon_{i,j,k}$ ($i$: patient, $j$: time, $k$: rater, $\alpha$: intercept) 
+where $u_i \sim N(0,\tau^2)$, $v_j \sim N(0,\delta^2)$, $z_k \sim N(0,\omega^2)$ and $\epsilon_{i,j,k} \sim N(0,\sigma^2)$  
+$ICC=\frac{\tau^2}{\tau^2 + \delta^2 + \sigma^2 + \omega^2}$
+
+```{r}
+fit_inter <- lmer(angle ~ 1 + (1|time) + (1|id) + (1|rater), data = gai_data)
+
+sigma_id_inter <- attr(VarCorr(fit_inter)[["id"]],"stddev")
+sigma_time_inter <- attr(VarCorr(fit_inter)[["time"]],"stddev")
+sigma_rater_inter <- attr(VarCorr(fit_inter)[["rater"]],"stddev")
+sigma_error_inter <- attr(VarCorr(fit_inter),"sc")
+
+icc_inter <- sigma_id_inter^2/(sigma_time_inter+sigma_rater_inter+sigma_id_inter^2)
+icc_inter
+
+inter_boot_func <-  function(data, index){
+  fit_inter <- lmer(angle ~ 1 + (1|time) + (1|id) + (1|rater), data = data[index,])
+  sigma_id_inter <- attr(VarCorr(fit_inter)[["id"]],"stddev")
+  sigma_time_inter <- attr(VarCorr(fit_inter)[["time"]],"stddev")
+  sigma_rater_inter <- attr(VarCorr(fit_inter)[["rater"]],"stddev")
+  sigma_error_inter <- attr(VarCorr(fit_inter),"sc")
+  icc_inter <- sigma_id_inter^2/(sigma_error_inter^2+sigma_time_inter+sigma_rater_inter+sigma_id_inter^2)
+  return(icc_inter)
+}
+
+set.seed(1234)
+res_inter <- boot(inter_boot_func,
+                  data = gai_data,
+                  R = 1000)
+res_inter[["t0"]]
+boot.ci(res_inter, type = "perc")
+```
