@@ -1,0 +1,100 @@
+---
+title: "Yamamoto Study Ver2"
+author: "Akihiro Shiroshita"
+date: "`r Sys.time()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	fig.height = 4,
+	fig.pos = "t",
+	message = FALSE,
+	warning = FALSE,
+	dpi = 350,
+	out.extra = ""
+)
+packages = c("MASS",
+             "nlme",
+             "lme4")
+package.check <- lapply(packages, FUN = function(x){
+  if (!require(x, character.only = TRUE)){
+    install.packages(x, dependencies = TRUE)
+    library(x, character.only = TRUE)
+  }
+})
+
+```
+
+# General simulation-based sample size calculation  
+
+Sample size calculation based on the hypothesis tests can be used only if the sampling distribution of the test statistic is known under null hypothesis and alternative hypothesis. 
+
+Randomly draw a sample based on the distribution assumption under the null hypothesis, and calculate the test statistic and xx-th percentile of the empirical distribution that is the critical value or type 1 error. Then, generate random samples under the alternative hypothesis, and calculate the test statistic and compare th the critical value.    
+
+## Liner mixed-effects model  
+
+Research question: whether a rater judges the angle higher than the other raters.    
+Here, we evaluate the angle only at time 1, and the Outcome is assumed to be normally distributed. 
+
+$y=u+B_0 + B_1x + \epsilon$ (where $x$: rater, $u$: subject, $u \sim N(0,\sigma^2_u)$ and residual $\epsilon \sim N(0,\sigma^2_{\epsilon})$)  
+$H_0: \beta1 = 0$ and $H_1: \beta1 \neq 0$  
+
+What it the sample size necessary for power of 80%?  
+
+You have to specifiy $\beta_1$ and intrapatient correaltion on the outcome = 0.4 and standard deviation of the outcome = 0.16.  
+
+```{r}
+alpha <- 0.05
+Bsim <- 500 # number of simulations
+effect <- 0.1 # beta1 (rater effect)
+corr <- 0.8 # intrasubject correlation
+beta0 <- 0.6 # beta0 (intercept)
+sd <- 0.40 # standard deviation of the outcome
+
+Nsim <- 100 # number of patients (not number of observations) 
+p.value <- c()
+
+rmat <- matrix(c(1, corr, corr, corr, corr,
+                 1, corr, corr, corr, corr, 1),
+               nrow=4,
+               ncol =4,
+               byrow = TRUE)
+
+p.value <- c()
+
+for (i in 1:Bsim) {
+  set.seed(i + Nsim*100)
+  x.vec  <- rep(1:4, times = 50)
+  id.vec <- rep(1:50, each = 4)
+  
+  v.mat <- sd*rmat
+  
+  set.seed(i+Nsim)
+  mean.rater1 <- beta0 + effect*c(1,0,0,0)
+  y.rater1 <- mvrnorm(Nsim, mean.rater1, v.mat)
+  
+  mean.rater2 <- beta0 + effect*c(0,1,0,0)
+  y.rater2 <- mvrnorm(Nsim, mean.rater2, v.mat)
+  
+  mean.rater3 <- beta0 + effect*c(0,0,1,0)
+  y.rater3 <- mvrnorm(Nsim, mean.rater3, v.mat)
+  
+  mean.rater4 <- beta0 + effect*c(0,0,0,1)
+  y.rater4 <- mvrnorm(Nsim, mean.rater4, v.mat)
+  
+  y.vec <- c(c(t(y.rater1)),
+             c(t(y.rater2)),
+             c(t(y.rater3)),
+             c(t(y.rater4)))
+  
+  dataset <- data.frame(y.vec, x.vec, id.vec)
+  data.formu <- groupedData(y.vec ~ x.vec|id.vec,
+                              data = dataset)
+  res <- lme(data.formu, random=~1)
+  p.value[i] <- summary(res)$tTable["x.vec", "p-value"]
+}
+
+pwr.func.res <- sum(ifelse(p.value < alpha, 1, 0))/Bsim
+```

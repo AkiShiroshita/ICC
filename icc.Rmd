@@ -61,7 +61,7 @@ Intra-rater reliability reflects that measured by a rater across multiple observ
 
 *Two-way mixed-effects model (ICC[3,4])*    
 
-$Y_{i,j,t} = \alpha + u_i + v_ij + \epsilon_{ijt}$ ($i$: patient, $j$: time, $t$: rater, $\alpha$: intercept)  
+$Y_{i,j,t} = \alpha + \beta t + u_i + v_ij + \epsilon_{ijt}$ ($i$: patient, $j$: time, $t$: rater, $\alpha$: intercept)  
 where $u_i \sim N(0,\tau^2)$, $v_ij \sim N(0,\delta^2)$ and $\epsilon_{ijt} \sim N(0,\sigma^2)$  
 $ICC=\frac{\tau^2}{\tau^2 + \frac{\delta^2+\sigma^2}{4}}$
 
@@ -73,7 +73,7 @@ intra_summary_results <- setNames(intra_summary_results, colnames)
 row.names(intra_summary_results) <- rownames
 
 intra_boot_func <-  function(data, index){
-  fit_intra <- lmer(angle ~ 1 + (1|time/id),
+  fit_intra <- lmer(angle ~ 1 + rater + (1|time/id),
                     data = data[index,],
                     control=lmerControl(check.nobs.vs.nlev = "ignore",
                                         check.nobs.vs.rankZ = "ignore",
@@ -99,14 +99,13 @@ for (i in 1:length(datasets)) {
 
 *Two-way mixed-effects model (ICC[3,2])*      
 
-The variance components splits the variance into three pieces (patient, rater, time).
-$Y_{i,j,t} = \alpha + u_i + v_{ij} + \epsilon_{ijk}$ ($i$: patient, $j$: rater, $k$: time, $\alpha$: intercept) 
+$Y_{i,j,t} = \alpha + \beta k + u_i + v_{ij} + \epsilon_{ijk}$ ($i$: patient, $j$: rater, $k$: time, $\alpha$: intercept) 
 where $u_i \sim N(0,\tau^2)$, $v_{ij} \sim N(0,\delta^2)$ and $\epsilon_{i,j,k} \sim N(0,\sigma^2)$  
 $ICC=\frac{\tau^2}{\tau^2 + \delta^2/2 + \sigma^2/2}$
 
 ```{r}
 inter_boot_func <-  function(data, index){
-  fit_inter <- lmer(angle ~ 1 + (1|rater/id),
+  fit_inter <- lmer(angle ~ 1 + time + (1|rater/id),
                     data = data[index,],
                     control=lmerControl(check.nobs.vs.nlev = "ignore",
                                         check.nobs.vs.rankZ = "ignore",
@@ -166,6 +165,7 @@ for(i in seq_len(r)){
 
 diff_intra_main <- quantile(diff,c(0.5, 0.025, 0.975))
 ```
+
 # Difference of inter-rater reliability between GAI and VTM  
 
 ```{r}
@@ -234,9 +234,7 @@ for (i in 1:length(datasets)) {
   res_inter2 <- boot(inter_boot_func2,
                   data = datasets[[i]],
                   R = r)
-  inter_summary_results2[i,1] <- res_inter2[["t0"]]
-  inter_summary_results2[i,c(2,3)] <- boot.ci(res_inter2,
-                                             type = "perc")[["percent"]][c(4,5)]
+  inter_summary_results[2i,c(1,2,3)] <- quantile(res_inter2[["t"]], c(0.5, 0.025, 0.975))
 }
 ```
 
@@ -265,3 +263,4 @@ kable(diff_intra_main)
 ```{r}
 kable(diff_inter_main)
 ```
+

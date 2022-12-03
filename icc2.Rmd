@@ -1,0 +1,173 @@
+---
+title: "Yamamoto Study Ver2"
+author: "Akihiro Shiroshita"
+date: "`r Sys.time()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	fig.height = 4,
+	fig.pos = "t",
+	message = FALSE,
+	warning = FALSE,
+	dpi = 350,
+	out.extra = ""
+)
+packages = c("data.table",
+             "lava",
+             "lme4",
+             "nlme",
+             "readxl",
+             "irr",
+             "tidyverse",
+             "psych",
+             "lubridate",
+             "ggplot2",
+             "RColorBrewer",
+             "ggplotgui",
+             "boot",
+             "knitr")
+package.check <- lapply(packages, FUN = function(x){
+  if (!require(x, character.only = TRUE)){
+    install.packages(x, dependencies = TRUE)
+    library(x, character.only = TRUE)
+  }
+})
+
+```
+
+```{r}
+main_gai <- read_excel("input/data.xls", sheet = "main_gai")
+sub_gai_junior <- main_gai %>% 
+  filter(rater == 1 | rater == 2)
+sub_gai_senior <- main_gai %>% 
+  filter(rater == 3 | rater ==4)
+main_vtm <- read_excel("input/data.xls", sheet = "main_vtm")
+sub_vtn_junior <- main_gai %>% 
+  filter(rater == 1 | rater == 2)
+sub_vtm_senior <- main_gai %>% 
+  filter(rater == 3 | rater ==4)
+sub_over_gai <- read_excel("input/data.xls", sheet = "sub_over_gai")
+sub_over_vtm <- read_excel("input/data.xls", sheet = "sub_over_vtm")
+sub_under_gai <- read_excel("input/data.xls", sheet = "sub_under_gai")
+sub_under_vtm <- read_excel("input/data.xls", sheet = "sub_under_vtm")
+
+datasets = list(main_gai, sub_gai_junior, sub_gai_senior, main_vtm, sub_vtn_junior, sub_over_gai, sub_vtm_senior, sub_over_vtm, sub_under_gai, sub_under_vtm)
+```
+
+# Intra-rater reliability  
+
+$Y_{i,j,t} = \alpha + \beta t + u_i + v_ij + \epsilon_{ijt}$ ($i$: patient, $j$: time, $t$: rater, $\alpha$: intercept)  
+where $u_i \sim N(0,\tau^2)$, $v_ij \sim N(0,\delta^2)$ and $\epsilon_{ijt} \sim N(0,\sigma^2)$  
+$ICC=\frac{\tau^2}{\tau^2 + \frac{\delta^2+\sigma^2}{4}}$
+
+```{r}
+intra_summary_results <- data.frame(matrix(ncol = 9, nrow = length(datasets)))
+colnames = c("ICC", "lower confidence interval", "upper confidence interval", "Within-subject SD", "lower confidence interval", "upper confidence interval", "RC", "lower confidence interval", "upper confidence interval")
+rownames = c("Main analysis GAI", "Main analysis GAI junior", "Main analysis GAI senior", "Main analysis VTM", "Main analysis VTM junior","Main analysis VTM senior", "Subgroup of more than or equal to 80 years GAI", "Subgroup of more than or equal to 80 years VTM", "Subgroup of under 80 years GAI", "Subgroup of under 80 years VTM")
+intra_summary_results <- setNames(intra_summary_results, colnames)
+row.names(intra_summary_results) <- rownames
+
+r <- 1000
+
+icc_intra <- data.frame(matrix(ncol = r, nrow = length(datasets)))
+within_sj_sd_intra <- data.frame(matrix(ncol = r, nrow = length(datasets)))
+rc_intra <- data.frame(matrix(ncol = r, nrow = length(datasets)))
+
+for(i in 1:length(datasets)){
+for(k in seq_len(r)){
+  set.seed(k)
+  
+  data <- datasets[[i]][sample(dim(datasets[[i]])[1],dim(datasets[[i]])[1],replace=TRUE),] 
+  
+  fit_intra <- lmer(angle ~ 1 + rater + (1|time/id),
+                    data = data,
+                    control=lmerControl(check.nobs.vs.nlev = "ignore",
+                                        check.nobs.vs.rankZ = "ignore",
+                                        check.nobs.vs.nRE="ignore"))
+  
+  sigma_id_time_intra <- attr(VarCorr(fit_intra)[["id:time"]],"stddev")
+  sigma_time_intra <- attr(VarCorr(fit_intra)[["time"]],"stddev")
+  sigma_error_intra <- attr(VarCorr(fit_intra),"sc")
+  
+  icc_intra[i,k] <- sigma_id_time_intra^2/(sigma_error_intra^2/4+sigma_time_intra^2/4+sigma_id_time_intra^2)
+  
+  within_sj_sd_intra[i,k] <- sigma_id_time_intra
+  
+  rc_intra[i,k] <- within_sj_sd_intra[i,k]*sqrt(2)*qnorm(0.975)
+}
+}
+
+for(i in 1:length(datasets)){
+  intra_summary_results[i, c(1,2,3)] <- quantile(icc_intra[i,],c(0.5, 0.025, 0.975))
+  intra_summary_results[i, c(4,5,6)] <- quantile(within_sj_sd_intra[i,],c(0.5, 0.025, 0.975))
+  intra_summary_results[i, c(7,8,9)] <- quantile(rc_intra[i,],c(0.5, 0.025, 0.975))
+}
+```
+
+intraではWithin-subject SD、RC 
+
+# Inter-rater reliability  
+
+*Two-way mixed-effects model (ICC[3,2])*      
+
+$Y_{i,j,t} = \alpha + \beta k + u_i + v_{ij} + \epsilon_{ijk}$ ($i$: patient, $j$: rater, $k$: time, $\alpha$: intercept) 
+where $u_i \sim N(0,\tau^2)$, $v_{ij} \sim N(0,\delta^2)$ and $\epsilon_{i,j,k} \sim N(0,\sigma^2)$  
+$ICC=\frac{\tau^2}{\tau^2 + \delta^2/2 + \sigma^2/2}$
+
+```{r}
+inter_summary_results <- data.frame(matrix(ncol = 9, nrow = length(datasets)))
+colnames = c("ICC", "lower confidence interval", "upper confidence interval", "SEM", "lower confidence interval", "upper confidence interval", "MDC", "lower confidence interval", "upper confidence interval")
+
+inter_summary_results <- setNames(inter_summary_results, colnames)
+row.names(inter_summary_results) <- rownames
+
+icc_inter <- data.frame(matrix(ncol = r, nrow = length(datasets)))
+sem_inter <- data.frame(matrix(ncol = r, nrow = length(datasets)))
+mdc_inter <- data.frame(matrix(ncol = r, nrow = length(datasets)))
+  
+for(i in 1:length(datasets)){
+for(k in seq_len(r)){
+  set.seed(k)
+  
+  data <- datasets[[i]][sample(dim(datasets[[i]])[1],dim(datasets[[i]])[1],replace=TRUE),] 
+  
+  fit_inter <- lmer(angle ~ 1 + time + (1|rater/id),
+                    data = data,
+                    control=lmerControl(check.nobs.vs.nlev = "ignore",
+                                        check.nobs.vs.rankZ = "ignore",
+                                        check.nobs.vs.nRE="ignore"))
+  sigma_id_rater <- attr(VarCorr(fit_inter)[["id:rater"]],"stddev")
+  sigma_rater <- attr(VarCorr(fit_inter)[["rater"]],"stddev")
+  sigma_error_inter <- attr(VarCorr(fit_inter),"sc")
+  
+  icc_inter[i,k] <- sigma_id_rater^2/(sigma_error_inter^2/2+sigma_id_rater^2+sigma_rater^2/2)
+  
+  sem_inter[i,k] <- sqrt(sigma_rater + sigma_error_intra)
+  
+  mdc_inter[i,k] <- sem_inter[i,k]*sqrt(2)*qnorm(0.975)
+}
+}
+
+for(i in 1:length(datasets)){
+  inter_summary_results[i, c(1,2,3)] <- quantile(icc_inter[i,],c(0.5, 0.025, 0.975))
+  inter_summary_results[i, c(4,5,6)] <- quantile(sem_inter[i,],c(0.5, 0.025, 0.975))
+  inter_summary_results[i, c(7,8,9)] <- quantile(mdc_inter[i,],c(0.5, 0.025, 0.975))
+}
+```
+
+# Results  
+
+## Intra-rater reliablilty  
+
+```{r}
+kable(intra_summary_results)
+```
+
+## Inter-rater reliablilty  
+
+```{r}
+kable(inter_summary_results)
+```
