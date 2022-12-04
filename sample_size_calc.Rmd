@@ -16,7 +16,7 @@ knitr::opts_chunk$set(
 	out.extra = ""
 )
 packages = c("MASS",
-             "nlme",
+             "lmerTest",
              "lme4")
 package.check <- lapply(packages, FUN = function(x){
   if (!require(x, character.only = TRUE)){
@@ -31,11 +31,12 @@ package.check <- lapply(packages, FUN = function(x){
 
 Sample size calculation based on the hypothesis tests can be used only if the sampling distribution of the test statistic is known under null hypothesis and alternative hypothesis. 
 
-Randomly draw a sample based on the distribution assumption under the null hypothesis, and calculate the test statistic and xx-th percentile of the empirical distribution that is the critical value or type 1 error. Then, generate random samples under the alternative hypothesis, and calculate the test statistic and compare th the critical value.    
+Generally, we randomly draw a sample based on the distribution assumption under the null hypothesis, and calculate the test statistic and xx-th percentile of the empirical distribution that is the critical value or type 1 error. Then, generate random samples under the alternative hypothesis, and calculate the test statistic and compare the critical value.    
 
 ## Liner mixed-effects model  
 
-Research question: whether a rater judges the angle higher than the other raters.    
+This example assumes the sampling distribution under the alternative hypothesis is known.  
+Research question: whether a senior rater judges the angle higher than a junior raters.    
 Here, we evaluate the angle only at time 1, and the Outcome is assumed to be normally distributed. 
 
 $y=u+B_0 + B_1x + \epsilon$ (where $x$: rater, $u$: subject, $u \sim N(0,\sigma^2_u)$ and residual $\epsilon \sim N(0,\sigma^2_{\epsilon})$)  
@@ -43,33 +44,38 @@ $H_0: \beta1 = 0$ and $H_1: \beta1 \neq 0$
 
 What it the sample size necessary for power of 80%?  
 
-You have to specifiy $\beta_1$ and intrapatient correaltion on the outcome = 0.4 and standard deviation of the outcome = 0.16.  
+You have to specifiy $\beta_1$ and intrapatient correaltion on the outcome = 0.8 and standard deviation of the outcome = 0.1.  
 
 ```{r}
 alpha <- 0.05
 Bsim <- 500 # number of simulations
-effect <- 0.1 # beta1 (rater effect)
-corr <- 0.8 # intrasubject correlation
+effect <- 0.2 # beta1 (rater effect)
+corr <- 0.8 # intrarater correlation
 beta0 <- 0.6 # beta0 (intercept)
-sd <- 0.40 # standard deviation of the outcome
+sd <- 0.2 # standard deviation of the outcome
 
 Nsim <- 100 # number of patients (not number of observations) 
 p.value <- c()
 
 rmat <- matrix(c(1, corr, corr, corr, corr,
-                 1, corr, corr, corr, corr, 1),
+                 1, corr, corr, corr, corr,
+                 1),
                nrow=4,
                ncol =4,
-               byrow = TRUE)
+               byrow = TRUE) # correlation coefficient
 
-p.value <- c()
+p.value <- c() # 
 
-for (i in 1:Bsim) {
-  set.seed(i + Nsim*100)
-  x.vec  <- rep(1:4, times = 50)
-  id.vec <- rep(1:50, each = 4)
+for (i in 1:Bsim) { # looping over the number of simulation
+  set.seed(i + Nsim*100) # patient is not independent
+  x.rater1 <- rep(c(1,0,0,0), times = Nsim) 
+  x.rater2 <- rep(c(0,1,0,0), times = Nsim) 
+  x.rater3 <- rep(c(0,0,1,0), times = Nsim) 
+  x.rater4 <- rep(c(0,0,0,1), times = Nsim) 
+  # patient assessed by rater 4 -> 3 -> 2 -> 1
+  pt.rater <- rep(1:Nsim, each = 4) # rater is independent
   
-  v.mat <- sd*rmat
+  v.mat <- sd*rmat # variance covariance matrix
   
   set.seed(i+Nsim)
   mean.rater1 <- beta0 + effect*c(1,0,0,0)
@@ -89,11 +95,10 @@ for (i in 1:Bsim) {
              c(t(y.rater3)),
              c(t(y.rater4)))
   
-  dataset <- data.frame(y.vec, x.vec, id.vec)
-  data.formu <- groupedData(y.vec ~ x.vec|id.vec,
-                              data = dataset)
-  res <- lme(data.formu, random=~1)
-  p.value[i] <- summary(res)$tTable["x.vec", "p-value"]
+  dataset <- data.frame(y.vec, x.vec, pt.rater)
+  res <- lmer(y.vec ~ 1 + x.vec + (1|pt.rater),
+                    data = dataset)
+  p.value[i] <- summary(res)[["coefficients"]][5]
 }
 
 pwr.func.res <- sum(ifelse(p.value < alpha, 1, 0))/Bsim
