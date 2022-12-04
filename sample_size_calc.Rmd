@@ -49,57 +49,68 @@ You have to specifiy $\beta_1$ and intrapatient correaltion on the outcome = 0.8
 ```{r}
 alpha <- 0.05
 Bsim <- 500 # number of simulations
-effect <- 0.2 # beta1 (rater effect)
-corr <- 0.8 # intrarater correlation
+effect21 <- 0.01 # beta1 (rater 2 vs rater1 effect) 
+effect31 <- -0.02 # beta2 (rater 3 vs rater1 effect) 
+effect41 <- -0.03 # beta1 (rater 4 vs rater1 effect)
+corr_rater <- 0.8 # intrarater correlation
+corr_subject <- 0.8 # intrasubject correlation
 beta0 <- 0.6 # beta0 (intercept)
-sd <- 0.2 # standard deviation of the outcome
+sd_time <- 0.05 # standard deviation of the outcome between time
+sd_subject <- 0.15 # standard deviation of the outcome between patient
 
-Nsim <- 100 # number of patients (not number of observations) 
+Nsim <- 50 # number of patients (not number of observations) 
 p.value <- c()
 
-rmat <- matrix(c(1, corr, corr, corr, corr,
-                 1, corr, corr, corr, corr,
-                 1),
-               nrow=4,
-               ncol =4,
-               byrow = TRUE) # correlation coefficient
+rmat_time <- matrix(c(1, corr_subject, corr_subject, 1),
+                    nrow = 2,
+                    ncol = 2,
+                    byrow = TRUE) # intrasubject correlation coefficient
 
-p.value <- c() # 
+rmat_subject <- matrix(c(1, corr_rater, corr_rater, corr_rater,
+                         corr_rater, 1, corr_rater, corr_rater,
+                         corr_rater, corr_rater, 1, corr_rater,
+                         corr_rater, corr_rater, corr_rater, 1),
+                       nrow = 4,
+                       ncol = 4,
+                       byrow = TRUE) # intrarater correlation coefficient
+
+p.value <- c() 
 
 for (i in 1:Bsim) { # looping over the number of simulation
-  set.seed(i + Nsim*100) # patient is not independent
-  x.rater1 <- rep(c(1,0,0,0), times = Nsim) 
-  x.rater2 <- rep(c(0,1,0,0), times = Nsim) 
-  x.rater3 <- rep(c(0,0,1,0), times = Nsim) 
-  x.rater4 <- rep(c(0,0,0,1), times = Nsim) 
-  # patient assessed by rater 4 -> 3 -> 2 -> 1
-  pt.rater <- rep(1:Nsim, each = 4) # rater is independent
   
-  v.mat <- sd*rmat # variance covariance matrix
+  x <- rep(1:Nsim, each = 8)
+  rater <- rep(c(1,1,2,2,3,3,4,4), times = Nsim)
+  time <- rep(c(1,2), times = Nsim*4)
+  
+  v.mat_time <- sd_time*rmat_time # variance covariance matrix between time
+  v.mat_subject <- sd_subject*rmat_subject # variance covariance matrix between subject
   
   set.seed(i+Nsim)
-  mean.rater1 <- beta0 + effect*c(1,0,0,0)
-  y.rater1 <- mvrnorm(Nsim, mean.rater1, v.mat)
+  mean.rater <- beta0 * beta0 + effect21*c(0,1,0,0) + effect31*c(0,0,1,0) + effect41*c(0,0,0,1)
   
-  mean.rater2 <- beta0 + effect*c(0,1,0,0)
-  y.rater2 <- mvrnorm(Nsim, mean.rater2, v.mat)
+  y.rater1 <- mvrnorm(Nsim, mean.rater, v.mat_subject)
+  y.rater2 <- mvrnorm(Nsim, mean.rater, v.mat_subject)
   
-  mean.rater3 <- beta0 + effect*c(0,0,1,0)
-  y.rater3 <- mvrnorm(Nsim, mean.rater3, v.mat)
+  y.rater <- c(rbind(y.rater1, y.rater2))
   
-  mean.rater4 <- beta0 + effect*c(0,0,0,1)
-  y.rater4 <- mvrnorm(Nsim, mean.rater4, v.mat)
+  y <- c()
   
-  y.vec <- c(c(t(y.rater1)),
-             c(t(y.rater2)),
-             c(t(y.rater3)),
-             c(t(y.rater4)))
+  for (j in 1:Nsim) {
+    tmp <- y.rater[c(2*(j-1)+1,2*(j-1)+2)]
+    y.rater_time <- mvrnorm(1, tmp, v.mat_time)
+    y <- c(y, y.rater_time)
+  }
   
-  dataset <- data.frame(y.vec, x.vec, pt.rater)
-  res <- lmer(y.vec ~ 1 + x.vec + (1|pt.rater),
+  dataset <- data.frame(y, x, rater, time)
+  res <- lmer(y ~ 1 + rater + (1|time/x),
                     data = dataset)
-  p.value[i] <- summary(res)[["coefficients"]][5]
+  ## define your aim here (e.g. p-value for rater)
 }
 
 pwr.func.res <- sum(ifelse(p.value < alpha, 1, 0))/Bsim
 ```
+
+```{r}
+
+```
+
